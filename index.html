@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#5b9cff" />
+  <title>Tri‑Sélectif Cam 🎯</title>
+
+  <!-- Dépendances: TFJS DOIT être chargé AVANT teachablemachine-image -->
+  <script defer src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.16.0/dist/tf.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@0.8/dist/teachablemachine-image.min.js"></script>
+  <!-- Confettis fun -->
+  <script defer src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
+
+  <style>
+    :root{
+      --bg1:#0f172a; /* slate-900 */
+      --bg2:#1e293b; /* slate-800 */
+      --accent:#60a5fa; /* blue-400 */
+      --good:#22c55e; /* green-500 */
+      --warn:#f59e0b; /* amber-500 */
+      --bad:#ef4444; /* red-500 */
+      --card:#111827ee; /* gray-900 */
+      --text:#e5e7eb; /* gray-200 */
+      --muted:#9ca3af; /* gray-400 */
+    }
+    html,body{height:100%;}
+    body{
+      margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
+      color:var(--text);
+      background: radial-gradient(1200px 800px at 20% -10%, #1d4ed8 0, transparent 60%),
+                  radial-gradient(900px 700px at 120% 10%, #0ea5e9 0, transparent 60%),
+                  linear-gradient(180deg, var(--bg1), var(--bg2));
+    }
+    .wrap{max-width:900px; margin:0 auto; padding:calc(env(safe-area-inset-top,0) + 24px) 16px 24px;}
+    header{display:flex; align-items:center; gap:12px;}
+    header .logo{width:42px; height:42px; display:grid; place-items:center; border-radius:12px; background:linear-gradient(135deg,#93c5fd,#60a5fa); box-shadow:0 10px 30px #60a5fa33; font-size:22px;}
+    h1{font-size:clamp(22px,3.5vw,34px); margin:0; letter-spacing:.2px;}
+    .sub{color:var(--muted); margin-top:4px;}
+
+    .card{margin-top:18px; background:var(--card); border:1px solid #ffffff1a; border-radius:18px; box-shadow:0 20px 60px #0006; overflow:hidden;}
+    .toolbar{display:flex; gap:12px; padding:14px; background:linear-gradient(180deg, #ffffff10, #00000000); align-items:center; flex-wrap:wrap;}
+    button.primary{
+      appearance:none; border:none; border-radius:14px; padding:12px 16px; font-weight:700; color:#0b1220;
+      background:linear-gradient(135deg,#93c5fd,#60a5fa); box-shadow:0 10px 30px #60a5fa44; cursor:pointer;
+    }
+    button.secondary{appearance:none; border:1px solid #ffffff2a; background:#0b1220; color:var(--text); border-radius:14px; padding:12px 16px;}
+    button:disabled{opacity:.6; cursor:not-allowed;}
+
+    .stage{display:grid; grid-template-columns:1fr;}
+    #webcam-container, #preview{
+      width:100%; aspect-ratio: 1 / 1; background:#0b1220; display:grid; place-items:center;
+    }
+    #webcam-container canvas, #preview video, #preview img{ width:100%; height:100%; object-fit:cover;}
+
+    .result{padding:16px; display:grid; gap:10px;}
+    .badge{display:inline-flex; align-items:center; gap:8px; background:#ffffff12; border:1px solid #ffffff24; padding:6px 10px; border-radius:999px; font-size:14px;}
+    .big{font-size: clamp(22px, 4.5vw, 36px); font-weight:800; letter-spacing:.3px;}
+    .progress{height:14px; background:#ffffff14; border:1px solid #ffffff20; border-radius:999px; overflow:hidden;}
+    .bar{height:100%; width:0%; transition: width .25s ease;}
+    .pct{font-variant-numeric: tabular-nums; opacity:.9}
+    .hint{color:var(--muted); font-size:14px;}
+
+    footer{padding:16px; color:#aab0b7; font-size:12px; text-align:center}
+    a{color:#cfe4ff}
+
+    details.tests{margin-top:16px;}
+    details.tests summary{cursor:pointer;}
+    .ok{color:#22c55e}
+    .ko{color:#ef4444}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="logo">♻️</div>
+      <div>
+        <h1>Tri‑Sélectif Cam</h1>
+        <div class="sub">Pointe la caméra vers un déchet et je te dis où le trier.</div>
+      </div>
+    </header>
+
+    <div class="card">
+      <div class="toolbar">
+        <button id="startBtn" class="primary">📷 Ouvrir la caméra</button>
+        <button id="switchBtn" class="secondary" disabled>🔁 Basculer caméra</button>
+        <button id="uploadBtn" class="secondary">🖼️ Photo depuis la galerie</button>
+        <input type="file" id="fileInput" accept="image/*" capture="environment" hidden>
+        <div class="badge" id="modelStatus">Modèle : <strong>non chargé</strong></div>
+      </div>
+
+      <div class="stage">
+        <div id="webcam-container"></div>
+        <div id="preview" hidden></div>
+      </div>
+
+      <div class="result">
+        <div class="badge"><span id="emoji">🤔</span> <span id="label">En attente…</span></div>
+        <div class="big"><span id="className">—</span></div>
+        <div class="progress"><div id="bar" class="bar"></div></div>
+        <div><span class="pct" id="pct">0%</span></div>
+        <div class="hint" id="hint">Astuce : reste stable 1–2 s pour une meilleure détection.</div>
+      </div>
+    </div>
+
+    <details class="tests">
+      <summary>🧪 Autotests / diagnostic (clique pour dérouler)</summary>
+      <div id="testsOut" style="padding:12px 0"></div>
+      <button id="runTests" class="secondary">Lancer les tests</button>
+    </details>
+
+    <footer>
+      Fait avec <a href="https://teachablemachine.withgoogle.com/" target="_blank" rel="noopener">Teachable Machine</a> & TensorFlow.js • Fonctionne sur mobile (HTTPS requis pour la caméra)
+    </footer>
+  </div>
+
+  <script>
+    // ====== Configuration ======
+    const MODEL_URL = "https://teachablemachine.withgoogle.com/models/OcZJIo9wh/"; // modèle fourni
+
+    // Emojis par classe — adapte aux labels exacts de TON modèle (casse/accents inclus)
+    const EMOJI_BY_CLASS = {
+      "plastique":"🧴",
+      "papier":"📄",
+      "carton":"📦",
+      "verre":"🍾",
+      "métal":"🥫",
+      "metal":"🥫",
+      "organique":"🍌",
+      "déchet":"🗑️",
+      "dechet":"🗑️"
+    };
+
+    let model, maxPredictions, webcam;
+    let usingWebcam = false;
+
+    const el = {
+      startBtn: document.getElementById('startBtn'),
+      switchBtn: document.getElementById('switchBtn'),
+      uploadBtn: document.getElementById('uploadBtn'),
+      fileInput: document.getElementById('fileInput'),
+      webcamContainer: document.getElementById('webcam-container'),
+      preview: document.getElementById('preview'),
+      modelStatus: document.getElementById('modelStatus'),
+      label: document.getElementById('label'),
+      className: document.getElementById('className'),
+      bar: document.getElementById('bar'),
+      pct: document.getElementById('pct'),
+      emoji: document.getElementById('emoji'),
+      hint: document.getElementById('hint'),
+      testsOut: document.getElementById('testsOut'),
+      runTests: document.getElementById('runTests'),
+    };
+
+    // Sécurité: s'assurer que les libs sont présentes AVANT usage
+    function libsReady(){
+      return typeof window !== 'undefined' && window.tf && window.tmImage && typeof tmImage.load === 'function';
+    }
+
+    // ——— Chargement du modèle au premier usage
+    async function ensureModelLoaded(){
+      if(model) return;
+      if(!libsReady()){
+        el.modelStatus.innerHTML = 'Modèle : <strong>❌ bibliothèques manquantes</strong>';
+        console.error('Bibliothèques non prêtes', { tf: !!window.tf, tmImage: !!window.tmImage });
+        alert('Les bibliothèques TFJS / TeachableMachine ne sont pas chargées. Vérifie ta connexion.');
+        throw new Error('Librairies non chargées');
+      }
+      try {
+        el.modelStatus.innerHTML = 'Modèle : <strong>chargement…</strong>';
+        // Assure un backend utilisable même si WebGL est bloqué
+        try {
+          await tf.ready();
+          const backends = tf.engine().registryFactory ? Object.keys(tf.engine().registryFactory) : [];
+          if(tf.backend().name !== 'webgl' && backends.includes('webgl')){
+            await tf.setBackend('webgl');
+          }
+        } catch (e) {
+          try { await tf.setBackend('cpu'); } catch(_){}
+        }
+        model = await tmImage.load(MODEL_URL + 'model.json', MODEL_URL + 'metadata.json');
+        maxPredictions = model.getTotalClasses();
+        el.modelStatus.innerHTML = 'Modèle : <strong>✅ prêt</strong>';
+      } catch(e){
+        console.error(e);
+        el.modelStatus.innerHTML = 'Modèle : <strong>❌ erreur</strong>';
+        alert("Impossible de charger le modèle. Vérifie l'URL ou ta connexion.");
+        throw e;
+      }
+    }
+
+    // ——— Démarrer la caméra
+    async function startCamera(){
+      await ensureModelLoaded();
+      try{
+        const flip = true; // flip horizontal (utile en selfie)
+        webcam = new tmImage.Webcam(320, 320, flip);
+        await webcam.setup({ facingMode: { ideal: 'environment' } });
+        await webcam.play();
+        usingWebcam = true;
+        el.switchBtn.disabled = false;
+        el.preview.hidden = true;
+        el.webcamContainer.innerHTML = '';
+        el.webcamContainer.appendChild(webcam.canvas);
+        requestAnimationFrame(loop);
+        el.hint.textContent = 'Conseil : rapproche-toi et assure un bon éclairage.';
+      }catch(e){
+        console.error(e);
+        alert('Accès caméra refusé ou indisponible. Utilise la galerie avec le bouton Photo.');
+      }
+    }
+
+    // ——— Boucle d'inférence
+    async function loop(){
+      if(!usingWebcam) return;
+      webcam.update();
+      await predictSource(webcam.canvas);
+      requestAnimationFrame(loop);
+    }
+
+    // ——— Prédire à partir d'une source (canvas / image)
+    async function predictSource(source){
+      if(!model) return;
+      const preds = await model.predict(source);
+      preds.sort((a,b)=> b.probability - a.probability);
+      const top = preds[0];
+      const p = Math.round(top.probability * 100);
+      el.className.textContent = top.className || 'Inconnu';
+      el.pct.textContent = p + '%';
+      el.bar.style.width = p + '%';
+      el.bar.style.background = p>85? 'linear-gradient(90deg, var(--good), #4ade80)': p>60? 'linear-gradient(90deg, var(--warn), #fbbf24)': 'linear-gradient(90deg, var(--bad), #f87171)';
+      const key = (top.className||'').normalize('NFD').replace(/\p{Diacritic}/gu,'').toLowerCase();
+      const emoji = EMOJI_BY_CLASS[top.className?.toLowerCase()] || EMOJI_BY_CLASS[key] || (p>85?'✅':'🤔');
+      el.emoji.textContent = emoji;
+      el.label.textContent = p>85? 'Je suis sûr·e !': p>60? 'Assez probable…' : 'Pas très sûr·e';
+
+      if(p > 90 && document.visibilityState === 'visible'){
+        try{ navigator.vibrate?.(50); }catch{}
+        confetti({ particleCount: 24, spread: 40, origin: { y: .85 }, scalar:.7 });
+      }
+    }
+
+    // ——— Basculer entre caméras (si dispo)
+    async function switchCamera(){
+      try{
+        if(!webcam) return;
+        await webcam.stop();
+        const track = webcam.stream?.getVideoTracks?.()[0];
+        const current = track?.getSettings?.().facingMode || 'environment';
+        const next = current === 'user' ? { ideal: 'environment' } : 'user';
+        await webcam.setup({ facingMode: next });
+        await webcam.play();
+      }catch(e){ console.warn('Switch cam error', e); }
+    }
+
+    // ——— Upload depuis la galerie
+    function openFile(){ el.fileInput.click(); }
+
+    el.fileInput.addEventListener('change', async (ev)=>{
+      await ensureModelLoaded();
+      const file = ev.target.files?.[0];
+      if(!file) return;
+      usingWebcam = false;
+      try{ await webcam?.stop?.(); }catch{}
+      const url = URL.createObjectURL(file);
+      el.preview.hidden = false;
+      el.webcamContainer.innerHTML = '';
+      el.preview.innerHTML = '';
+      const img = new Image();
+      img.onload = async ()=>{
+        el.preview.appendChild(img);
+        await predictSource(img);
+      };
+      img.src = url;
+      el.hint.textContent = 'Tu peux reprendre la caméra quand tu veux.';
+    });
+
+    // ——— Tests / Diagnostic
+    function print(line, ok){
+      const p = document.createElement('div');
+      p.innerHTML = (ok? '<span class="ok">✔</span>':'<span class="ko">✖</span>') + ' ' + line;
+      el.testsOut.appendChild(p);
+    }
+
+    async function runDiagnostics(){
+      el.testsOut.innerHTML='';
+      // Test 1: libs chargées
+      print('TFJS chargé: ' + (!!window.tf), !!window.tf);
+      print('tmImage chargé: ' + (!!window.tmImage), !!window.tmImage);
+      print('tmImage.load dispo: ' + (window.tmImage && typeof tmImage.load==='function'), window.tmImage && typeof tmImage.load==='function');
+
+      // Test 2: fetch metadata.json
+      try{
+        const res = await fetch(MODEL_URL + 'metadata.json', {cache:'no-store'});
+        print('metadata.json accessible (HTTP '+res.status+')', res.ok);
+        if(res.ok){
+          const meta = await res.json();
+          print('metadata contient des labels: ' + Array.isArray(meta?.labels), Array.isArray(meta?.labels));
+        }
+      }catch(e){ print('metadata.json inaccessible: ' + e.message, false); }
+
+      // Test 3: chargement minimal du modèle
+      try{
+        await ensureModelLoaded();
+        print('Chargement du modèle OK', true);
+      }catch(e){ print('Chargement du modèle ÉCHEC: '+e.message, false); }
+    }
+
+    // ——— Events UI
+    el.startBtn.addEventListener('click', startCamera);
+    el.switchBtn.addEventListener('click', switchCamera);
+    el.uploadBtn.addEventListener('click', openFile);
+    el.runTests.addEventListener('click', runDiagnostics);
+
+    // Pré‑charge silencieuse (et vérification de backend)
+    window.addEventListener('load', async ()=>{
+      // Attendre que les <script defer> soient exécutés
+      const start = performance.now();
+      const timeout = 5000;
+      while(!libsReady() && performance.now()-start < timeout){
+        await new Promise(r=>setTimeout(r, 50));
+      }
+      if(libsReady()){
+        // Lancer un pré‑chargement non bloquant
+        ensureModelLoaded().catch(()=>{});
+      } else {
+        console.warn('Bibliothèques non prêtes après attente');
+      }
+    });
+  </script>
+</body>
+</html>
